@@ -222,8 +222,8 @@ def _prefetch_provider_models_parallel(provider_slugs: list[str]) -> None:
     non-blocking serial read for a parallel fetch the picker waits on. Persistence is
     ``cached_provider_model_ids``'s own locked write; workers add none of their own."""
     from hermes_cli.models import (
-        _credential_fingerprint, _disk_serve_tier, _load_provider_models_cache,
-        _normalized_cache_slug, cached_provider_model_ids)
+        _credential_fingerprint, _load_provider_models_cache, _normalized_cache_slug, cached_provider_model_ids)
+    from hermes_cli.models_cache_rows import _disk_serve_tier
 
     now = time.time()
 
@@ -406,14 +406,16 @@ def _is_aws_sdk(pconfig) -> bool:
 def _live_or_curated_ids(slug: str, curated: dict, *fallback_keys: str, merge_models_dev: bool = True,
                          non_blocking: bool = False) -> list:
     """``cached_provider_model_ids`` (the SAME disk-cached list ``hermes model`` builds), falling
-    back to the curated list (merged with models.dev for preferred providers) when live is empty.
+    back to the curated list (merged with models.dev for preferred providers) when live is empty
+    and not an authoritative account answer.
     ``non_blocking`` (GUI read path) reads the disk cache only — a provider that is slow or down
     contributes its curated list instead of stalling the whole picker (#114215)."""
     from hermes_cli.models import _MODELS_DEV_PREFERRED, _merge_with_models_dev, cached_provider_model_ids
+    from hermes_cli.models_catalog_static import AuthoritativeModels
     from hermes_cli.chat_catalog import without_generation_models
 
     model_ids = cached_provider_model_ids(slug, non_blocking=non_blocking)
-    if not model_ids:
+    if not model_ids and not isinstance(model_ids, AuthoritativeModels):
         model_ids = _first_curated(curated, fallback_keys or (slug,))
         if merge_models_dev and slug in _MODELS_DEV_PREFERRED:
             model_ids = _merge_with_models_dev(slug, model_ids)
@@ -1254,14 +1256,13 @@ def list_authenticated_providers(
 
     non_blocking_catalogs = bool(non_blocking_catalogs)
 
-    # Explicit refresh: drop every cached list so the calls below re-fetch live. A stale cache
-    # can fall back to the curated static list when its live fetch fails, silently dropping
-    # live-only models the user had seen.
+    # Explicit refresh: expire every cached list so the calls below re-fetch live; a failed fetch
+    # still serves the same credential's last list, never the curated one in its place.
     if refresh:
         non_blocking_catalogs = False  # an explicit refresh is allowed to block on live probes
         try:
-            from hermes_cli.models import clear_provider_models_cache
-            clear_provider_models_cache()
+            from hermes_cli.models import expire_provider_models_cache
+            expire_provider_models_cache()
         except Exception:
             pass
 

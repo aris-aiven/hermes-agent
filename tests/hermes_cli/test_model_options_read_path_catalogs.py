@@ -27,7 +27,7 @@ def _picker_env(monkeypatch, tmp_path, *, hung=None):
     release = threading.Event()
     live_calls: list[str] = []
 
-    def fake_provider_model_ids(provider, *, force_refresh=False):
+    def fake_provider_model_ids(provider, *, force_refresh=False, request=None):
         live_calls.append(provider)
         if provider == hung:
             release.wait(30)

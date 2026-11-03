@@ -2022,7 +2022,7 @@ cli:
     switch_cancelled: "모델 전환이 취소됐어요."
     selection_failed: "✗ 모델 선택 실패: {error}"
     switch_failed: "⚠ {model}(으)로 모델 전환 실패 ({error}); {old_model}을(를) 계속 사용해요."
-    cleared_picker_cache: "모델 선택기 캐시를 지웠어요. 새로 고치는 중..."
+    cleared_picker_cache: "모델 목록을 새로 고치는 중..."
     moa_one_shot_queued: "프리셋 {preset}(으)로 MoA 일회성 실행이 대기열에 추가됐어요. 이 턴이 끝나면 이전 모델로 복원돼요."
     normalized_model: "{provider}용 모델 '{old}'을(를) '{new}'(으)로 정규화했어요."
     stripped_provider_prefix: "'{old}'에서 제공자 접두사를 제거했어요. {provider}에는 '{new}'을(를) 사용해요."

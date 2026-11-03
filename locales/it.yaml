@@ -2022,7 +2022,7 @@ cli:
     switch_cancelled: "Cambio di modello annullato."
     selection_failed: "✗ Selezione del modello non riuscita: {error}"
     switch_failed: "⚠ Passaggio al modello {model} non riuscito ({error}); resto su {old_model}."
-    cleared_picker_cache: "Cache del selettore di modelli svuotata. Aggiornamento..."
+    cleared_picker_cache: "Aggiornamento degli elenchi dei modelli..."
     moa_one_shot_queued: "MoA one-shot in coda con il preset {preset}; il modello precedente verrà ripristinato dopo questo turno."
     normalized_model: "Modello '{old}' normalizzato in '{new}' per {provider}."
     stripped_provider_prefix: "Rimosso il prefisso del provider da '{old}'; uso '{new}' per {provider}."

@@ -580,10 +580,10 @@ class GatewayModelCommandsMixin:
         request = parse_model_switch_args(event.get_command_args().strip())  # single-owner parser
         if request.errors:
             return f"❌ {request.error_messages()[0]}"  # gateway decoration over canonical copy
-        if request.force_refresh:  # bust the disk cache so the picker shows live data
+        if request.force_refresh:  # expire the disk cache so the picker shows live data
             with contextlib.suppress(Exception):
-                from hermes_cli.models import clear_provider_models_cache
-                clear_provider_models_cache()
+                from hermes_cli.models import expire_provider_models_cache
+                expire_provider_models_cache()
         # Normalize like a message turn (Telegram DM topic recovery) before deriving the override
         # key, so the override lands under the key the next turn reads.
         # Check for session override. See #30479.

@@ -14,6 +14,11 @@ class CuratedFallbackModels(list[str]):
     treats it as a placeholder, never as the account's real catalog (#107391)."""
 
 
+class AuthoritativeModels(list[str]):
+    """A successful live list from a provider with ``authoritative_catalog``: the complete catalog,
+    so an empty one is an answer to serve and cache, never a miss to fill with curated rows."""
+
+
 # Fallback OpenRouter snapshot used when the live catalog is unavailable, as
 # ``(model_id, description shown in menus)``. ``:free`` SKUs are described "free".
 _OPENROUTER_DESCRIPTIONS = {

@@ -22,16 +22,16 @@ import urllib.request
 import urllib.error
 import time
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from typing import TypeGuard
+from typing import Any, Optional
 
 from agent.proxy_bypass import is_loopback_host
 from hermes_cli.route_identity import normalize_route_base_url
 from hermes_cli.urllib_security import open_credentialed_url
 from hermes_cli.version_info import hermes_user_agent
+from hermes_cli.models_account_identity import AccountRequest, account_catalog, account_request, identity_parts
+from hermes_cli.models_cache_rows import _cache_entry_valid, _disk_serve_tier, _live_result_entry, cached_rows
 from hermes_cli.models_catalog_static import (
+    AuthoritativeModels,
     CuratedFallbackModels,
     CANONICAL_PROVIDERS,
     OPENROUTER_MODELS,
@@ -1588,7 +1588,7 @@ def _profile_live_catalog(normalized: str) -> Optional[list[str]]:
             live = None
         # Same merge as setup (`_model_flow_plugin_provider`) so /model, the Desktop picker and
         # `hermes model` offer one list: live ids plus any pinned id the probe omitted.
-        return merge_profile_catalog(normalized, profile, list(live) if live else None)
+        return merge_profile_catalog(normalized, profile, None if live is None else list(live))
     if not (profile.auth_type == "api_key" and profile.base_url):
         return list(profile.fallback_models) or None
     api_key, base_url = _api_key_credentials(normalized)
@@ -1610,8 +1610,11 @@ def probe_profile_catalog(normalized: str, profile, api_key: Optional[str], base
 def merge_profile_catalog(normalized: str, profile, live: Optional[list[str]]) -> Optional[list[str]]:
     """Combine a profile's live catalog with its curated list the way the ``/model`` picker does, so
     first-time setup (``model_setup_flows._api_key_provider_model_list``) offers the same rows the
-    picker will later show. Empty live → ``fallback_models`` (None when the profile has none)."""
-    if not live:
+    picker will later show. Empty live → ``fallback_models`` (None when the profile has none), unless
+    the profile's ``authoritative_catalog`` makes any successful list, empty included, the answer."""
+    if live is not None and getattr(profile, "authoritative_catalog", False) is True:
+        rows = AuthoritativeModels(live)
+    elif not live:
         rows = CuratedFallbackModels(profile.fallback_models) if profile.fallback_models else None
     else:
         curated = list(static_catalog(normalized)) or list(profile.fallback_models or ())
@@ -1733,14 +1736,19 @@ def _static_catalog(normalized: str, fetcher: Any) -> list[str]:
     return _chat_catalog_rows(_xai_finalize_catalog(merged) if normalized in {"xai", "xai-oauth"} else merged)
 
 
-def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) -> list[str]:
+def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False,
+                       request: Optional[AccountRequest] = None) -> list[str]:
     """Best known model catalog for a provider: per-provider live fetchers, then the generic profile
-    fetch, then the static list (merged with models.dev for ``_MODELS_DEV_PREFERRED`` providers)."""
+    fetch, then the static list (merged with models.dev for ``_MODELS_DEV_PREFERRED`` providers). An
+    ``authoritative_catalog`` profile sends one request with *request* (captured now when omitted)."""
     requested = str(provider or "").strip().lower()
     if requested == "ollama":
         return _ollama_local_catalog(force_refresh)
 
     normalized = normalize_provider(provider)
+    if (request := request or account_request(normalized)) is not None:
+        live = account_catalog(normalized, request)
+        return _chat_catalog_rows(live if live is not None else _static_catalog(normalized, None))
     # A configured `model.base_url` relay is TERMINAL for live catalog egress: the picker must
     # list what the configured endpoint serves and must never touch the vendor host (#121387).
     # A failed or empty probe degrades to the local curated list — falling through to the
@@ -1749,7 +1757,7 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
     relay = _configured_relay_base_url(provider or "")
     if relay and normalized not in _RELAY_AWARE_CATALOG_FETCHERS:
         relayed = _relay_model_catalog(normalized, relay)
-        if relayed:
+        if relayed is not None:
             return _chat_catalog_rows(relayed)
         return _static_catalog(normalized, _catalog_fetcher(normalized))
     fetcher = _catalog_fetcher(normalized)
@@ -1771,7 +1779,8 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
 # Disk cache for provider_model_ids() — keeps /model picker fast (otherwise every open re-fetches
 # every authed provider's /v1/models). One JSON file at $HERMES_HOME/provider_models_cache.json;
 # entries keyed by credential fingerprint (rotate OPENAI_API_KEY → entry invalidates); 1h TTL;
-# only NON-EMPTY results are cached so a transient failure is never pinned; any read/write error
+# only NON-EMPTY results are cached so a transient failure is never pinned (an authoritative empty
+# answer, `AuthoritativeModels`, is a result, not a failure); any read/write error
 # degrades silently to a live fetch.
 # ---------------------------------------------------------------------------
 
@@ -1792,17 +1801,6 @@ _swr_refresh_lock = threading.Lock()
 def _cache_entry(fp: str, models: list[str], at: Optional[float] = None) -> dict:
     """One provider row of the disk cache: credential fingerprint, write time, model ids."""
     return {"fp": fp, "at": time.time() if at is None else at, "models": list(models)}
-
-
-def _live_result_entry(fp: str, live: list[str], existing: Any, at: Optional[float] = None) -> Optional[dict]:
-    """Row to store for a ``provider_model_ids`` result, or ``None`` to keep *existing*: a curated
-    fallback never replaces the account's real catalog for the same credentials, and when it is
-    stored it is flagged so it expires on the short fallback TTL."""
-    if not isinstance(live, CuratedFallbackModels):
-        return _cache_entry(fp, live, at)
-    if _cache_entry_valid(existing, fp) and not existing.get("fallback"):
-        return None
-    return {**_cache_entry(fp, live, at), "fallback": True}
 
 
 def _ollama_native_probe_reachable() -> bool:
@@ -1830,10 +1828,13 @@ def _spawn_swr_refresh(cache_key: str, refresh_fn=None) -> None:
         _swr_refresh_inflight.add(inflight_key)
 
     def _default_refresh():
-        live = provider_model_ids(cache_key, force_refresh=True)
-        if live or (cache_key == "ollama" and _ollama_native_probe_reachable()):
-            fp = _credential_fingerprint(cache_key)
-            return _live_result_entry(fp, live or [], _load_provider_models_cache().get(cache_key))
+        # Keyed to the credentials the fetch runs under: a key or endpoint switched while it is in
+        # flight must not file this answer under the new identity.
+        request = account_request(cache_key)
+        fp = _credential_fingerprint(cache_key, request)
+        live = provider_model_ids(cache_key, force_refresh=True, request=request)
+        if live or isinstance(live, AuthoritativeModels) or (cache_key == "ollama" and _ollama_native_probe_reachable()):
+            return _live_result_entry(fp, live, _load_provider_models_cache().get(cache_key))
         return None
 
     def _refresh() -> None:
@@ -1859,8 +1860,9 @@ def _provider_models_cache_path() -> Path:
     return get_hermes_home() / "provider_models_cache.json"
 
 
-def _credential_fingerprint(provider: str) -> str:
-    """Short hash of the credentials ``provider_model_ids(provider)`` would see right now.
+def _credential_fingerprint(provider: str, request: Optional[AccountRequest] = None) -> str:
+    """Short hash of the credentials ``provider_model_ids(provider)`` would see right now, or that
+    *request* (an authoritative discovery's captured identity) sends.
 
     API-key providers include their configured values and credential-file mtimes. Codex uses the
     stable principal selected by its read-only resolver: routine token and pool-state writes must
@@ -1881,15 +1883,8 @@ def _credential_fingerprint(provider: str) -> str:
     except Exception:
         pass
 
-    # External-process providers discover models through the launched program, so the command /
-    # argv env overrides identify the catalog the way an API key identifies an HTTP catalog.
     try:
-        from providers import get_provider_profile
-        profile = get_provider_profile(provider)
-        if profile is not None and profile.auth_type == "external_process":
-            for ev in (*profile.process_command_env_vars, profile.process_args_env_var):
-                if ev:
-                    parts.append(f"{ev}={os.environ.get(ev, '')}")
+        parts += identity_parts(provider, request)
     except Exception:
         pass
 
@@ -1900,6 +1895,11 @@ def _credential_fingerprint(provider: str) -> str:
             parts.append(f"effective_base={_openai_discovery_base_url(provider)}")
         except Exception:
             pass
+
+    # Any provider discovers through a configured ``model.base_url`` relay (#121387), whose catalog
+    # is not the canonical endpoint's, so the relay is part of the identity too.
+    if relay := _configured_relay_base_url(provider):
+        parts.append(f"relay_base={relay}")
 
     # Azure Foundry deployments are per-resource and the wizard writes only model.base_url, so a
     # resource switch under the same key must not serve the previous resource's catalog (#27989).
@@ -2004,7 +2004,7 @@ def cached_provider_model_ids(
     provider: Optional[str], *, force_refresh: bool = False,
     ttl_seconds: int = _PROVIDER_MODELS_CACHE_TTL, non_blocking: bool = False) -> list[str]:
     """Disk-cached :func:`provider_model_ids`: fresh cache hit, else live fetch persisting a non-empty
-    result. Always returns a list.
+    or authoritative result. Always returns a list.
 
     ``non_blocking`` marks the GUI read path (``model.options``): it NEVER waits on a provider probe.
     A same-credentials row of any age is served as-is and a daemon thread warms the next open; a
@@ -2016,7 +2016,8 @@ def cached_provider_model_ids(
     is_ollama = normalized == "ollama"
 
     cache = _load_provider_models_cache()
-    fp = _credential_fingerprint(normalized)
+    request = account_request(normalized)  # one capture: the row is filed under what is sent
+    fp = _credential_fingerprint(normalized, request)
     entry = cache.get(normalized)
     now = time.time()
 
@@ -2025,7 +2026,7 @@ def cached_provider_model_ids(
         if tier is not None:
             if tier == "stale":
                 _spawn_swr_refresh(normalized)
-            return _chat_catalog_rows(list(entry["models"]))
+            return _chat_catalog_rows(cached_rows(entry))
 
     if non_blocking and not force_refresh:
         # Read path: never touch the network in the caller's thread. A same-credentials row past the
@@ -2033,19 +2034,17 @@ def cached_provider_model_ids(
         # warms the next open; a cold row returns [] and the caller falls back to its curated list.
         _spawn_swr_refresh(normalized)
         if _cache_entry_valid(entry, fp, allow_empty=is_ollama):
-            return _chat_catalog_rows([
-                model for model in entry["models"]
-                if not _model_requires_account_discovery(normalized, model)])
+            return _discovered_rows(normalized, entry)
         return []
 
-    live = provider_model_ids(normalized, force_refresh=force_refresh)
-    if live:
+    live = provider_model_ids(normalized, force_refresh=force_refresh, request=request)
+    if live or isinstance(live, AuthoritativeModels):
         fresh = _live_result_entry(fp, live, entry, now)
         if fresh is None:
             # The live fetch degraded to the curated list; the account's real catalog is on disk.
-            return _chat_catalog_rows([model for model in entry["models"] if not _model_requires_account_discovery(normalized, model)])
+            return _discovered_rows(normalized, entry)
         _store_cache_entry(normalized, fresh)
-        return _chat_catalog_rows(list(live))
+        return _chat_catalog_rows(cached_rows(fresh))
 
     if is_ollama:
         if _ollama_native_probe_reachable():
@@ -2062,25 +2061,51 @@ def cached_provider_model_ids(
     # models, which only a successful discovery may advertise (the entry itself is untouched, so the
     # next successful fetch restores them).
     if _cache_entry_valid(entry, fp):
-        return _chat_catalog_rows([model for model in entry["models"] if not _model_requires_account_discovery(normalized, model)])
+        return _discovered_rows(normalized, entry)
     return []
 
 
+def _discovered_rows(normalized: str, entry: dict) -> list[str]:
+    """A cached row served without a successful discovery this call: minus account-gated models."""
+    rows = cached_rows(entry)
+    return _chat_catalog_rows(type(rows)(m for m in rows if not _model_requires_account_discovery(normalized, m)))
+
+
+def _clear_catalog_memos() -> None:
+    from hermes_cli.model_catalog import clear_fetch_backoff
+    clear_fetch_backoff()  # a recovered catalog is fetched now, not after the offline backoff
+    # Native Ollama tags are keyed by root URL, not provider slug: clear them on every refresh.
+    _OLLAMA_LOCAL_MODELS_CACHE.clear()
+    _OLLAMA_LOCAL_PROBE_FAILURE_CACHE.clear()
+    _OLLAMA_LOCAL_PROBE_REACHABLE.clear()
+    # Provider-owned in-process memos (e.g. an external CLI's session catalog) must re-probe so a
+    # fresh login shows on the next switch.
+    from providers import list_providers
+    for profile in list_providers():
+        profile.invalidate_catalog_cache()
+
+
+def expire_provider_models_cache() -> None:
+    """Explicit refresh (``/model --refresh``, ``hermes model --refresh``, the picker's ``refresh``):
+    every catalog is fetched live on its next read. An authoritative row stays on disk, due, as its
+    credential's answer when that fetch fails (deleting it would show the seed in place of the
+    account's last list, empty included); other rows are dropped, as a refresh always did."""
+    from hermes_cli.models_cache_lock import write_under_cache_lock
+    _clear_catalog_memos()
+
+    def expire_rows() -> None:
+        if cache := _load_provider_models_cache():
+            _save_provider_models_cache({k: {**v, "at": 0} for k, v in cache.items()
+                                         if isinstance(v, dict) and v.get("authoritative") is True})
+
+    write_under_cache_lock(_provider_models_cache_path(), expire_rows)
+
+
 def clear_provider_models_cache(provider: Optional[str] = None) -> None:
-    """Drop one provider's cache entry, or wipe the whole cache (``provider=None``). Used by
-    ``/model --refresh`` and ``hermes model --refresh``."""
+    """Drop one provider's cache entry (its credential was removed), or wipe the whole cache
+    (``provider=None``)."""
     try:
-        from hermes_cli.model_catalog import clear_fetch_backoff
-        clear_fetch_backoff()  # a recovered catalog is fetched now, not after the offline backoff
-        # Native Ollama tags are keyed by root URL, not provider slug: clear them on every refresh.
-        _OLLAMA_LOCAL_MODELS_CACHE.clear()
-        _OLLAMA_LOCAL_PROBE_FAILURE_CACHE.clear()
-        _OLLAMA_LOCAL_PROBE_REACHABLE.clear()
-        # Provider-owned in-process memos (e.g. an external CLI's session catalog) must re-probe so a
-        # fresh login shows on the next switch.
-        from providers import list_providers
-        for profile in list_providers():
-            profile.invalidate_catalog_cache()
+        _clear_catalog_memos()
         from hermes_cli.models_cache_lock import write_under_cache_lock
         path = _provider_models_cache_path()
 
@@ -2549,41 +2574,6 @@ def _custom_endpoint_fingerprint(
     identity = api_key.cache_identity if isinstance(api_key, CommandTokenSource) else api_key
     blob = "|".join((identity or "", api_mode or "", json.dumps(headers or {}, sort_keys=True)))
     return hashlib.blake2b(blob.encode("utf-8", errors="replace"), digest_size=8).hexdigest()
-
-
-def _cache_entry_valid(
-    entry: Any, fp: str, *, allow_empty: bool = False) -> TypeGuard[dict[str, Any]]:
-    """Well-formed cache row for fingerprint *fp*. Requires a numeric ``at`` so corrupt disk state
-    degrades to a cache miss instead of raising; empty model lists are valid only when the caller
-    opts into an authoritative empty catalog."""
-    return (
-        isinstance(entry, dict)
-        and entry.get("fp") == fp
-        and isinstance(entry.get("models"), list)
-        and (allow_empty or bool(entry["models"]))
-        and isinstance(entry.get("at"), (int, float))
-        and not isinstance(entry.get("at"), bool))
-
-
-def _disk_serve_tier(entry: Any, fp: str, now: float, *, is_ollama: bool,
-                     ttl_seconds: int = _PROVIDER_MODELS_CACHE_TTL) -> Optional[str]:
-    """How :func:`cached_provider_model_ids` serves *entry* without the network.
-
-    ``"fresh"`` inside the row's TTL (a curated fallback row only for
-    ``_PROVIDER_MODELS_FALLBACK_TTL``), ``"stale"`` for a non-empty, non-fallback row inside
-    ``_PROVIDER_MODELS_STALE_SERVE_MAX`` (served while an SWR thread revalidates), else ``None``:
-    the call would block on a live fetch. Empty native catalogs are authoritative only inside the
-    short native TTL, never through the stale window."""
-    if is_ollama:
-        ttl_seconds = min(ttl_seconds, _OLLAMA_LOCAL_MODELS_CACHE_TTL)
-    if not _cache_entry_valid(entry, fp, allow_empty=is_ollama):
-        return None
-    age = now - entry["at"]
-    if age < (_PROVIDER_MODELS_FALLBACK_TTL if entry.get("fallback") else ttl_seconds):
-        return "fresh"
-    if entry["models"] and not entry.get("fallback") and age < _PROVIDER_MODELS_STALE_SERVE_MAX:
-        return "stale"
-    return None
 
 
 def cached_fetch_api_models(

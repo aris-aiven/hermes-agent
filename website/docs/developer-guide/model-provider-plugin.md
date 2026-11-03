@@ -324,6 +324,7 @@ meaning says otherwise.
 | `picker_catalog` | `(force_refresh) -> list`: the provider's own model-picker catalog, tried before the generic fetch | `None` |
 | `static_models` | Curated ids answered as this provider's row of the static catalog (looked up per profile home, never copied into the shared table) | `()` |
 | `catalog_credential_files` | Credential files whose mtime joins every cached catalog's fingerprint | `()` |
+| `authoritative_catalog` | `True`: a successful `fetch_models()` list, empty included, is the complete catalog; pickers, setup and the disk cache serve it without `fallback_models`, which answer only a failed (`None`) fetch with no cached list for the same resolved key and endpoint | `False` (live merged with curated) |
 | `probe_models()` | `(ids or None, probed_url, resolved_base_url)` for a `/models` probe this provider answers | `None` (generic HTTP probe) |
 | `invalidate_catalog_cache()` | Drops in-process catalog memos (`/model --refresh`) | no-op |
 | `picker_after` | Provider slug this row follows in the provider list | `""` (appended) |

@@ -156,10 +156,10 @@ class TestFetchFailure:
             assert model_catalog.get_catalog() == _valid_manifest()
 
     def test_model_refresh_retries_a_backed_off_catalog(self, isolated_home):
-        """``/model --refresh`` (``clear_provider_models_cache``) must show a catalog that came back
+        """``/model --refresh`` (``expire_provider_models_cache``) must show a catalog that came back
         inside the backoff window, override URL included."""
         from hermes_cli import model_catalog
-        from hermes_cli.models import clear_provider_models_cache
+        from hermes_cli.models import expire_provider_models_cache
         override = _valid_manifest()
         override["providers"]["openrouter"]["models"] = [{"id": "vendor/override-model", "description": ""}]
         cfg = {"enabled": True, "url": "http://master", "ttl_hours": 24.0,
@@ -172,7 +172,7 @@ class TestFetchFailure:
                 return override if "override" in url else _valid_manifest()
 
             with patch.object(model_catalog, "_fetch_manifest", side_effect=recovered):
-                clear_provider_models_cache()
+                expire_provider_models_cache()
                 assert model_catalog.get_curated_openrouter_models() == [("vendor/override-model", "")]
 
     def test_override_failure_backs_off_per_profile(self, isolated_home, tmp_path):

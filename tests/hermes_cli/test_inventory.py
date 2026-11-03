@@ -665,11 +665,11 @@ def test_build_models_payload_no_max_models_returns_full_list():
 
 
 def test_list_authenticated_providers_refresh_busts_cache():
-    """refresh=True clears the provider-model disk cache exactly once;
+    """refresh=True expires the provider-model disk cache exactly once;
     refresh=False leaves it untouched (so normal picker opens stay snappy)."""
     from hermes_cli import model_switch
 
-    with patch("hermes_cli.models.clear_provider_models_cache") as clear:
+    with patch("hermes_cli.models.expire_provider_models_cache") as clear:
         model_switch.list_authenticated_providers(refresh=False)
         assert clear.call_count == 0
         model_switch.list_authenticated_providers(refresh=True)

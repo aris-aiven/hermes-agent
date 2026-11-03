@@ -714,6 +714,10 @@ class ProviderProfile:
     static_models: tuple = field(default=(), kw_only=True)
     # Credential files (``~`` allowed) whose mtime is folded into every cached catalog's fingerprint.
     catalog_credential_files: tuple = field(default=(), kw_only=True)
+    # True = a successful ``fetch_models`` list (empty included) is the account's complete catalog:
+    # pickers, setup and the disk cache serve it as-is instead of merging ``fallback_models``, which
+    # stay the answer only when the fetch fails (None).
+    authoritative_catalog: bool = field(default=False, kw_only=True)
 
     def probe_models(
         self, *, base_url: str, api_key: str | None = None, timeout: float = 5.0,

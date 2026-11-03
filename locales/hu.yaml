@@ -2039,7 +2039,7 @@ cli:
     switch_cancelled: "Modellváltás megszakítva."
     selection_failed: "✗ A modell kiválasztása nem sikerült: {error}"
     switch_failed: "⚠ Nem sikerült átváltani a(z) {model} modellre ({error}); marad: {old_model}."
-    cleared_picker_cache: "A modellválasztó gyorsítótára törölve. Frissítés..."
+    cleared_picker_cache: "Modelllisták frissítése..."
     moa_one_shot_queued: "Egyszeri MoA-futás sorba állítva a {preset} előbeállítással; a kör után az előző modell visszaáll."
     normalized_model: "A(z) '{old}' modell normalizálva erre: '{new}' ({provider})."
     stripped_provider_prefix: "A szolgáltató-előtag eltávolítva a(z) '{old}' névről; a(z) '{new}' lesz használva ({provider})."

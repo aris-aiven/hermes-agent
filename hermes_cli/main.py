@@ -1851,9 +1851,9 @@ def cmd_model(args):
     _require_tty("model")
     if getattr(args, "refresh", False):
         try:
-            from hermes_cli.models import clear_provider_models_cache
-            clear_provider_models_cache()
-            print("  Cleared model picker cache.")
+            from hermes_cli.models import expire_provider_models_cache
+            expire_provider_models_cache()
+            print("  Refreshing model lists.")
         except Exception:
             pass
     from hermes_cli.observability.shared_metrics_setup import provider_setup_surface

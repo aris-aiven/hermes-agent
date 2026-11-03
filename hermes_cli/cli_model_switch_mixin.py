@@ -1007,11 +1007,11 @@ class CLIModelSwitchMixin:
             request.is_global, request.is_session, is_once=one_turn,
             explicit_provider=request.explicit_provider)
 
-        # --refresh: wipe the picker cache so every authed provider's /v1/models is re-fetched.
+        # --refresh: expire the picker cache so every authed provider's /v1/models is re-fetched.
         if request.force_refresh:
             try:
-                from hermes_cli.models import clear_provider_models_cache
-                clear_provider_models_cache()
+                from hermes_cli.models import expire_provider_models_cache
+                expire_provider_models_cache()
                 _cprint(f"  {t('cli.model.cleared_picker_cache')}")
             except Exception:
                 pass

@@ -265,10 +265,10 @@ class TestPrefetchProviderModelsParallel:
         from hermes_cli.model_switch_providers import _prefetch_provider_models_parallel
 
         monkeypatch.setattr(mod, "_provider_models_cache_path", lambda: tmp_path / "provider_models_cache.json")
-        monkeypatch.setattr(mod, "_credential_fingerprint", lambda provider: "fp")
+        monkeypatch.setattr(mod, "_credential_fingerprint", lambda provider, request=None: "fp")
         fast_persisted = threading.Event()
 
-        def fake_provider_model_ids(slug, force_refresh=False):
+        def fake_provider_model_ids(slug, force_refresh=False, request=None):
             if slug != "openrouter":
                 # The slow provider answers only after the fast one fully persisted.
                 assert fast_persisted.wait(10)
@@ -295,8 +295,8 @@ class TestPrefetchProviderModelsParallel:
         from hermes_cli.model_switch_providers import _prefetch_provider_models_parallel
 
         monkeypatch.setattr(mod, "_provider_models_cache_path", lambda: tmp_path / "provider_models_cache.json")
-        monkeypatch.setattr(mod, "_credential_fingerprint", lambda provider: "fp")
-        monkeypatch.setattr(mod, "provider_model_ids", lambda slug, force_refresh=False: [])
+        monkeypatch.setattr(mod, "_credential_fingerprint", lambda provider, request=None: "fp")
+        monkeypatch.setattr(mod, "provider_model_ids", lambda slug, force_refresh=False, request=None: [])
         stale_at = time.time() - mod._PROVIDER_MODELS_STALE_SERVE_MAX - 3600
         mod._save_provider_models_cache({"openrouter": {"fp": "fp", "at": stale_at, "models": ["openrouter/model"]}})
 

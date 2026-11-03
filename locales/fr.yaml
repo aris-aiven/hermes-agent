@@ -2274,7 +2274,7 @@ cli:
     switch_cancelled: "Changement de modèle annulé."
     selection_failed: "✗ Échec de la sélection du modèle : {error}"
     switch_failed: "⚠ Échec du passage au modèle {model} ({error}) ; {old_model} est conservé."
-    cleared_picker_cache: "Cache du sélecteur de modèles vidé. Actualisation..."
+    cleared_picker_cache: "Actualisation des listes de modèles..."
     moa_one_shot_queued: "MoA en une passe mis en file avec le preset {preset} ; le modèle précédent sera rétabli après ce tour."
     normalized_model: "Modèle '{old}' normalisé en '{new}' pour {provider}."
     stripped_provider_prefix: "Préfixe de fournisseur retiré de '{old}' ; utilisation de '{new}' pour {provider}."

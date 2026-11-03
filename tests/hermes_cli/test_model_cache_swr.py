@@ -174,7 +174,7 @@ class TestProviderModelsSWR:
             out = mod.cached_provider_model_ids("openrouter", force_refresh=True)
         assert out == ["live"]
         spawn.assert_not_called()
-        live.assert_called_once_with("openrouter", force_refresh=True)
+        live.assert_called_once_with("openrouter", force_refresh=True, request=None)
 
     def test_swr_refresh_dedupes_inflight(self):
         import hermes_cli.models as mod
