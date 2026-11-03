@@ -603,6 +603,11 @@ def _import_plugin_dir(plugin_dir: Path, source: str, *, home_key: str = "") -> 
     """
     if not (plugin_dir / "__init__.py").exists():
         return
+    from providers._manifest import directory_load_error
+    if reason := directory_load_error(plugin_dir, source):
+        logger.warning("Provider plugin %s skipped: %s", plugin_dir.name, reason)
+        _note_load_result(plugin_dir, ValueError(reason))
+        return
     if source != "bundled":
         from hermes_cli.plugin_isolation import ISOLATION_HOST, isolation_mode
         if isolation_mode() == ISOLATION_HOST:  # the plugin's code runs in the plugin host
@@ -835,12 +840,16 @@ def bundled_profiles() -> list[ProviderProfile]:
 
     if safe_worker_enabled():  # a safe worker loads no plugin code, bundled included (as list_providers)
         return []
+    from providers._manifest import directory_load_error
     collected: list[ProviderProfile] = []
     token = _COLLECT.set(collected)
     try:
         for child in sorted(_BUNDLED_PLUGINS_DIR.iterdir()) if _BUNDLED_PLUGINS_DIR.is_dir() else ():
             init = child / "__init__.py"
             if not child.is_dir() or child.name.startswith(("_", ".")) or not init.exists():
+                continue
+            if reason := directory_load_error(child, "bundled"):
+                logger.warning("Provider catalog skipped %s: %s", child.name, reason)
                 continue
             name = f"_hermes_provider_catalog_{child.name.replace('-', '_')}"
             spec = importlib.util.spec_from_file_location(name, init, submodule_search_locations=[str(child)])
